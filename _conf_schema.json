@@ -1,0 +1,75 @@
+{
+  "timeout": {
+    "type": "int",
+    "description": "每轮猜歌游戏的超时时间（秒）",
+    "hint": "用户猜一首歌的等待时长，超时后自动进入下一首。",
+    "default": 60,
+    "slider": {
+      "min": 10,
+      "max": 300,
+      "step": 5
+    }
+  },
+  "max_rounds": {
+    "type": "int",
+    "description": "游戏总轮数",
+    "hint": "每局游戏进行多少轮，到达该轮数后自动结算。",
+    "default": 10,
+    "slider": {
+      "min": 3,
+      "max": 30,
+      "step": 1
+    }
+  },
+  "song_files": {
+    "type": "file",
+    "description": "上传音乐文件",
+    "hint": "支持上传多个音乐文件（MP3/WAV/FLAC 等格式）。",
+    "default": [],
+    "file_types": ["mp3", "wav", "flac", "m4a", "aac", "ogg"]
+  },
+  "song_meta": {
+    "type": "template_list",
+    "description": "歌曲答案与提示（可选）",
+    "hint": "为已上传的歌曲配置正确答案与提示。file_name 需与上传文件名一致；不配置则使用文件名（不含扩展名）作为答案。",
+    "templates": {
+      "song": {
+        "name": "歌曲信息",
+        "display_item": "file_name",
+        "items": {
+          "file_name": {
+            "type": "string",
+            "description": "文件名（与上传列表一致）",
+            "default": ""
+          },
+          "answers": {
+            "type": "list",
+            "description": "正确答案列表",
+            "hint": "中文名、英文名、别名等。留空则使用文件名。",
+            "default": []
+          },
+          "artist": {
+            "type": "string",
+            "description": "演唱者（用于提示）",
+            "default": ""
+          },
+          "year": {
+            "type": "string",
+            "description": "发行年份（用于提示）",
+            "default": ""
+          },
+          "lyric": {
+            "type": "string",
+            "description": "歌词片段（用于提示）",
+            "default": ""
+          },
+          "genre": {
+            "type": "string",
+            "description": "歌曲风格（用于提示）",
+            "default": ""
+          }
+        }
+      }
+    }
+  }
+}
