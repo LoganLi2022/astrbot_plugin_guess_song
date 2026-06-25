@@ -32,6 +32,12 @@
       "step": 1
     }
   },
+  "case_insensitive_answers": {
+    "type": "bool",
+    "description": "答案匹配不区分大小写",
+    "hint": "开启后 Cage 与 cage 视为同一答案；关闭后须与配置中的答案完全一致。",
+    "default": true
+  },
   "song_files": {
     "type": "file",
     "description": "上传音乐文件",

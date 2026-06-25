@@ -386,6 +386,37 @@ class GuessSongPlugin(Star):
         """Normalize user text for command and answer matching."""
         return text.strip()
 
+    def _matches_answer(
+        self,
+        user_input: str,
+        answer: str,
+        *,
+        case_insensitive: bool,
+    ) -> bool:
+        """Return whether user input matches one configured answer."""
+        user = self._normalize_user_input(user_input)
+        expected = str(answer).strip()
+        if case_insensitive:
+            return user.lower() == expected.lower()
+        return user == expected
+
+    def _is_correct_guess(
+        self,
+        user_input: str,
+        correct_answers: list,
+        *,
+        case_insensitive: bool,
+    ) -> bool:
+        """Return whether user input matches any configured answer."""
+        return any(
+            self._matches_answer(
+                user_input,
+                answer,
+                case_insensitive=case_insensitive,
+            )
+            for answer in correct_answers
+        )
+
     def _is_exit_command(self, text: str) -> bool:
         """Return whether the user message is an exit command."""
         raw = self._normalize_user_input(text)
@@ -504,8 +535,10 @@ class GuessSongPlugin(Star):
 
             current_song = game["song_queue"][game["current_song_index"]]
             correct_answers = current_song.get("answers", [])
-            is_correct = any(
-                answer.lower() == user_input.lower() for answer in correct_answers
+            is_correct = self._is_correct_guess(
+                user_input,
+                correct_answers,
+                case_insensitive=game.get("case_insensitive_answers", True),
             )
 
             if is_correct:
@@ -604,6 +637,7 @@ class GuessSongPlugin(Star):
         timeout = self.config.get("timeout", 60)
         max_rounds = self.config.get("max_rounds", 10)
         no_answer_auto_end_rounds = self.config.get("no_answer_auto_end_rounds", 2)
+        case_insensitive_answers = self.config.get("case_insensitive_answers", True)
 
         song_queue = self.song_data.copy()
         random.shuffle(song_queue)
@@ -622,6 +656,7 @@ class GuessSongPlugin(Star):
             "round_has_guess": False,
             "no_answer_streak": 0,
             "no_answer_auto_end_rounds": no_answer_auto_end_rounds,
+            "case_insensitive_answers": case_insensitive_answers,
             "start_time": asyncio.get_event_loop().time(),
             "anchor_event": event,
         }
