@@ -94,7 +94,7 @@ class GuessSongPlugin(Star):
                 "👋 游戏已退出！",
                 "🚪 主动退出游戏！",
             ],
-            "auto_end_no_answer": "😴 连续两轮无人作答，游戏已自动结束。",
+            "auto_end_no_answer": "😴 连续 {} 轮无人作答，游戏已自动结束。",
             "no_songs": "😅 没有可用的歌曲，请先在插件配置中上传音乐文件！",
             "round_info": "🎯 第 {}/{} 轮",
         }
@@ -603,6 +603,7 @@ class GuessSongPlugin(Star):
 
         timeout = self.config.get("timeout", 60)
         max_rounds = self.config.get("max_rounds", 10)
+        no_answer_auto_end_rounds = self.config.get("no_answer_auto_end_rounds", 2)
 
         song_queue = self.song_data.copy()
         random.shuffle(song_queue)
@@ -620,6 +621,7 @@ class GuessSongPlugin(Star):
             "hint_sent": False,
             "round_has_guess": False,
             "no_answer_streak": 0,
+            "no_answer_auto_end_rounds": no_answer_auto_end_rounds,
             "start_time": asyncio.get_event_loop().time(),
             "anchor_event": event,
         }
@@ -763,9 +765,12 @@ class GuessSongPlugin(Star):
         timeout_msg = random.choice(self.messages["timeout"]).format(correct_answer)
         await event.send(event.plain_result(timeout_msg))
 
-        if game["no_answer_streak"] >= 2:
+        auto_end_rounds = game.get("no_answer_auto_end_rounds", 2)
+        if auto_end_rounds > 0 and game["no_answer_streak"] >= auto_end_rounds:
             await event.send(
-                event.plain_result(self.messages["auto_end_no_answer"]),
+                event.plain_result(
+                    self.messages["auto_end_no_answer"].format(auto_end_rounds),
+                ),
             )
             await self._end_game(event, session_id)
             return

@@ -21,6 +21,17 @@
       "step": 1
     }
   },
+  "no_answer_auto_end_rounds": {
+    "type": "int",
+    "description": "连续无人作答自动结束轮数",
+    "hint": "连续多少轮超时且无人猜测后自动结束游戏。设为 0 表示关闭此功能。",
+    "default": 2,
+    "slider": {
+      "min": 0,
+      "max": 10,
+      "step": 1
+    }
+  },
   "song_files": {
     "type": "file",
     "description": "上传音乐文件",
