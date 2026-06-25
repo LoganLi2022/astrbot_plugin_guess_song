@@ -295,6 +295,22 @@ class GuessSongPlugin(Star):
 
         return wrong_answers
 
+    def _get_mixed_answer_choices(
+        self,
+        correct_answers: list,
+        wrong_count: int = 3,
+    ) -> list[str]:
+        """Mix one correct answer with wrong distractors and shuffle."""
+        correct_answer = (
+            correct_answers[0]
+            if correct_answers
+            else "未知"
+        )
+        wrong_answers = self._get_answer_choices(correct_answers, count=wrong_count)
+        choices = [correct_answer, *wrong_answers]
+        random.shuffle(choices)
+        return choices
+
     async def _send_audio_file(
         self,
         event: AstrMessageEvent,
@@ -749,7 +765,7 @@ class GuessSongPlugin(Star):
         current_song = game["song_queue"][game["current_song_index"]]
         correct_answers = current_song.get("answers", [])
         correct_answer = correct_answers[0] if correct_answers else "未知"
-        wrong_answers = self._get_answer_choices(correct_answers, count=3)
+        mixed_choices = self._get_mixed_answer_choices(correct_answers, wrong_count=3)
 
         hint_parts = ["⏰ 时间过了一半啦！给你个提示："]
 
@@ -776,7 +792,7 @@ class GuessSongPlugin(Star):
         else:
             hint_parts.append(f"📝 答案是 {len(correct_answer)} 个字的歌曲")
 
-        hint_parts.append(f"❌ 这些都不是正确答案哦：{', '.join(wrong_answers)}")
+        hint_parts.append(f"🎯 可能是这些之一：{', '.join(mixed_choices)}")
 
         await event.send(event.plain_result("\n".join(hint_parts)))
         game["hint_sent"] = True
