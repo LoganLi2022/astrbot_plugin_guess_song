@@ -1,14 +1,57 @@
-# astrbot-plugin-helloworld
+# AstrBot 猜歌迷插件
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+一个不依赖 LLM 的简单的猜歌迷插件，支持群聊和私聊的猜歌迷小游戏。
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+## 功能特性
 
-# Supports
+- 支持从本地上传音频文件到 `plugin_data` 对应的插件目录中。
+- 可配置的歌曲答案与提示。
+- 可配置的每轮猜歌游戏的超时时间以及一局游戏的总轮数。
+- 可配置的连续无人作答自动结束轮数。
+- 可配置的答案匹配不区分大小写。
+- 可配置的无人应答指定轮次后自动退出。
+- 支持游戏结算得分统计。
+- 支持游戏临时退出。
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+## 安装方法
+
+1. **下载插件**
+   - 将插件目录 `astrbot_plugin_guess_song` 复制到 AstrBot 的插件目录 `data/plugins/` 下。
+2. **重启 AstrBot**
+   - 重启后 AstrBot 会自动扫描 `data/plugins/` 下的插件并进行插件初始化。
+3. **在插件配置中添加音频文件**
+   - 从插件配置中添加的音频文件会保存在 AstrBot 的插件数据目录 `data/plugin_data/astrbot_plugin_guess_song/files/song_files` 下。
+
+## 使用说明
+
+### 基本使用
+
+- 在群聊或者私聊中发送 `猜歌迷` 、`猜歌` 、`猜歌曲` 关键词即可开始游戏。
+- 一轮游戏结束后会自动进行游戏结算。
+- 若连续两轮（可配置）无人回答则自动退出游戏。
+- 发送 `退出` 、`结束` 、`exit` 、`quit` 、`结束游戏` 等关键词即可临时退出游戏。
+
+### 配置选项
+
+在 AstrBot 的插件配置界面中，可以设置以下选项：
+
+| 配置项                    | 类型          | 默认值 | 描述                                                         |
+| ------------------------- | ------------- | ------ | ------------------------------------------------------------ |
+| timeout                   | int           | 60     | 用户猜一首歌的等待时长，超时后自动进入下一首。               |
+| max_rounds                | int           | 10     | 每局游戏进行多少轮，到达该轮数后自动结算。                   |
+| no_answer_auto_end_rounds | int           | 2      | 连续多少轮超时且无人猜测后自动结束游戏。设为 0 表示关闭此功能。 |
+| case_insensitive_answers  | bool          | true   | 开启后 Cage 与 cage 视为同一答案；关闭后须与配置中的答案完全一致。 |
+| song_files                | file          | None   | 支持上传多个音乐文件（MP3/WAV/FLAC 等格式）。                |
+| song_meta                 | template_list | None   | 为已上传的歌曲配置正确答案与提示。file_name 需与上传文件名一致；不配置则使用文件名（不含扩展名）作为答案。 |
+
+## 许可证
+
+MIT License
+
+## 贡献
+
+欢迎提交 Issue 和 Pull Request 来改进本插件！
+
+------
+
+**享受猜歌迷带来的快乐吧！** 😊
