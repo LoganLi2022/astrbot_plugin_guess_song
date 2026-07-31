@@ -18,6 +18,9 @@ from astrbot.core.utils.session_waiter import (
 )
 
 PLUGIN_NAME = "astrbot_plugin_guess_song"
+MANUAL_MODE_TIMEOUT = 3600
+MANUAL_SCORE_USER = "__visitor__"
+MANUAL_STAFF_COMMANDS = frozenset({"正确", "错误", "答案"})
 EXIT_COMMANDS = frozenset(
     {
         "退出",
@@ -95,6 +98,12 @@ class GuessSongPlugin(Star):
                 "🚪 主动退出游戏！",
             ],
             "auto_end_no_answer": "😴 连续 {} 轮无人作答，游戏已自动结束。",
+            "manual_start": (
+                "🎪 广o猜歌迷小游戏开始！播放音频后由摊主判定，"
+                "请发送：正确 / 错误 / 答案"
+            ),
+            "manual_round_prompt": "🎤 请游客作答。摊主回复：正确 / 错误 / 答案",
+            "manual_answer": "📖 正确答案：{}",
             "no_songs": "😅 没有可用的歌曲，请先在插件配置中上传音乐文件！",
             "round_info": "🎯 第 {}/{} 轮",
         }
@@ -448,6 +457,103 @@ class GuessSongPlugin(Star):
                     return True
         return False
 
+    def _is_manual_staff_command(self, text: str) -> bool:
+        """Return whether the message is a staff control command in manual mode."""
+        return self._normalize_user_input(text) in MANUAL_STAFF_COMMANDS
+
+    def _current_song(self, game: dict) -> dict:
+        """Return the song record for the active round."""
+        return game["song_queue"][game["current_song_index"]]
+
+    def _format_correct_answers(self, correct_answers: list) -> str:
+        """Format accepted answers for display."""
+        if not correct_answers:
+            return "未知"
+        return "、".join(f"《{answer}》" for answer in correct_answers)
+
+    def _build_game_data(
+        self,
+        event: AstrMessageEvent,
+        *,
+        manual_mode: bool = False,
+    ) -> dict:
+        """Create initial game state for a new session."""
+        timeout = self.config.get("timeout", 60)
+        max_rounds = self.config.get("max_rounds", 10)
+        no_answer_auto_end_rounds = self.config.get("no_answer_auto_end_rounds", 2)
+        case_insensitive_answers = self.config.get("case_insensitive_answers", True)
+
+        song_queue = self.song_data.copy()
+        random.shuffle(song_queue)
+
+        game_data = {
+            "scores": {},
+            "nicknames": {},
+            "round": 0,
+            "max_rounds": max_rounds,
+            "current_song_index": 0,
+            "song_queue": song_queue,
+            "timeout": MANUAL_MODE_TIMEOUT if manual_mode else timeout,
+            "is_active": True,
+            "manual_mode": manual_mode,
+            "used_hint": False,
+            "hint_sent": False,
+            "round_has_guess": False,
+            "no_answer_streak": 0,
+            "no_answer_auto_end_rounds": 0 if manual_mode else no_answer_auto_end_rounds,
+            "case_insensitive_answers": case_insensitive_answers,
+            "start_time": asyncio.get_event_loop().time(),
+            "anchor_event": event,
+        }
+        if manual_mode:
+            game_data["nicknames"][MANUAL_SCORE_USER] = "游客"
+        return game_data
+
+    async def _advance_round(
+        self,
+        event: AstrMessageEvent,
+        session_id: str,
+    ) -> bool:
+        """Advance to the next round. Return False if the game has ended."""
+        game = self.game_sessions.get(session_id)
+        if not game:
+            return False
+
+        game["round"] += 1
+        if game["round"] >= game["max_rounds"]:
+            await self._end_game(event, session_id)
+            return False
+
+        game["current_song_index"] = (
+            game["current_song_index"] + 1
+        ) % len(game["song_queue"])
+        game["used_hint"] = False
+        game["hint_sent"] = False
+        await self._start_round(event, session_id)
+        return True
+
+    async def _begin_game_session(
+        self,
+        event: AstrMessageEvent,
+        session_id: str,
+        *,
+        manual_mode: bool = False,
+    ) -> None:
+        """Initialize game state and run the session loop."""
+        game_data = self._build_game_data(event, manual_mode=manual_mode)
+        self.game_sessions[session_id] = game_data
+        if not manual_mode:
+            self._remember_player_name(game_data, event.get_sender_id(), event)
+
+        try:
+            await self._start_round(event, session_id)
+            await self._run_game_session_loop(event, session_id)
+        except Exception as e:
+            logger.error(f"猜歌游戏运行失败: {e}")
+            self._stop_session_waiter(session_id)
+            self.game_sessions.pop(session_id, None)
+            await event.send(event.plain_result("😅 游戏出现了问题，请重新开始"))
+
     def _touch_session_event(self, session_id: str, event: AstrMessageEvent) -> None:
         """Keep a recent event for the session so replies target the right chat."""
         game = self.game_sessions.get(session_id)
@@ -596,6 +702,81 @@ class GuessSongPlugin(Star):
 
         await guess_song_waiter(anchor_event, session_filter=CustomFilter())
 
+    async def _wait_for_manual_input(
+        self,
+        anchor_event: AstrMessageEvent,
+        session_id: str,
+    ) -> None:
+        """Wait for staff control commands in Guangzhou manual mode."""
+        game = self.game_sessions.get(session_id)
+        if not game:
+            return
+
+        timeout = game["timeout"]
+
+        @session_waiter(timeout=timeout, record_history_chains=False)
+        async def manual_guess_waiter(
+            controller: SessionController,
+            event: AstrMessageEvent,
+        ):
+            if session_id not in self.game_sessions:
+                controller.stop()
+                return
+
+            game = self.game_sessions[session_id]
+            if not game["is_active"]:
+                controller.stop()
+                return
+
+            self._touch_session_event(session_id, event)
+            user_input = self._normalize_user_input(event.message_str)
+
+            if self._is_exit_command(user_input):
+                await self._end_game(event, session_id, is_exit=True)
+                controller.stop()
+                return
+
+            if not self._is_manual_staff_command(user_input):
+                controller.keep(timeout=0, reset_timeout=False)
+                return
+
+            current_song = self._current_song(game)
+            correct_answers = current_song.get("answers", [])
+
+            if user_input == "答案":
+                answer_text = self._format_correct_answers(correct_answers)
+                await event.send(
+                    event.plain_result(
+                        self.messages["manual_answer"].format(answer_text),
+                    ),
+                )
+                controller.keep(timeout=0, reset_timeout=False)
+                return
+
+            if user_input == "正确":
+                game["scores"][MANUAL_SCORE_USER] = (
+                    game["scores"].get(MANUAL_SCORE_USER, 0) + 1
+                )
+                correct_msg = random.choice(self.messages["correct"])
+                await event.send(
+                    event.plain_result(
+                        f"{correct_msg} (当前得分: {game['scores'][MANUAL_SCORE_USER]})",
+                    ),
+                )
+                if await self._advance_round(event, session_id):
+                    controller.keep(timeout=game["timeout"], reset_timeout=True)
+                else:
+                    controller.stop()
+                return
+
+            if user_input == "错误":
+                if await self._advance_round(event, session_id):
+                    controller.keep(timeout=game["timeout"], reset_timeout=True)
+                else:
+                    controller.stop()
+
+        await manual_guess_waiter(anchor_event, session_filter=CustomFilter())
+
     async def _run_game_session_loop(
         self,
         event: AstrMessageEvent,
@@ -614,14 +795,21 @@ class GuessSongPlugin(Star):
                 break
 
             anchor_event = game.get("anchor_event", event)
+            wait_for_input = (
+                self._wait_for_manual_input
+                if game.get("manual_mode")
+                else self._wait_for_guess_input
+            )
             try:
-                await self._wait_for_guess_input(anchor_event, session_id)
+                await wait_for_input(anchor_event, session_id)
             except TimeoutError:
                 if session_id not in self.game_sessions:
                     break
                 game = self.game_sessions.get(session_id)
                 if not game or not game["is_active"]:
                     break
+                if game.get("manual_mode"):
+                    continue
                 anchor_event = game.get("anchor_event", event)
                 await self._handle_timeout(anchor_event, session_id)
                 continue
@@ -650,48 +838,34 @@ class GuessSongPlugin(Star):
             yield event.plain_result("⚠️ 当前会话已有进行中的游戏，请先完成或退出！")
             return
 
-        timeout = self.config.get("timeout", 60)
+        start_msg = random.choice(self.messages["start"])
         max_rounds = self.config.get("max_rounds", 10)
-        no_answer_auto_end_rounds = self.config.get("no_answer_auto_end_rounds", 2)
-        case_insensitive_answers = self.config.get("case_insensitive_answers", True)
+        yield event.plain_result(
+            f"{start_msg}\n🎯 共 {len(self.song_data)} 首歌曲，进行 {max_rounds} 轮",
+        )
 
-        song_queue = self.song_data.copy()
-        random.shuffle(song_queue)
+        await self._begin_game_session(event, session_id, manual_mode=False)
 
-        game_data = {
-            "scores": {},
-            "nicknames": {},
-            "round": 0,
-            "max_rounds": max_rounds,
-            "current_song_index": 0,
-            "song_queue": song_queue,
-            "timeout": timeout,
-            "is_active": True,
-            "used_hint": False,
-            "hint_sent": False,
-            "round_has_guess": False,
-            "no_answer_streak": 0,
-            "no_answer_auto_end_rounds": no_answer_auto_end_rounds,
-            "case_insensitive_answers": case_insensitive_answers,
-            "start_time": asyncio.get_event_loop().time(),
-            "anchor_event": event,
-        }
-        self.game_sessions[session_id] = game_data
-        self._remember_player_name(game_data, event.get_sender_id(), event)
+    @filter.command("广o猜歌迷")
+    async def handle_guangzhou_guess_song(self, event: AstrMessageEvent):
+        """开始广o猜歌迷（摊主人工判定模式）"""
+        self.song_data = self._load_songs_from_config()
 
-        try:
-            start_msg = random.choice(self.messages["start"])
-            yield event.plain_result(
-                f"{start_msg}\n🎯 共 {len(self.song_data)} 首歌曲，进行 {max_rounds} 轮",
-            )
+        if not self.song_data:
+            yield event.plain_result(self.messages["no_songs"])
+            return
 
-            await self._start_round(event, session_id)
-            await self._run_game_session_loop(event, session_id)
-        except Exception as e:
-            logger.error(f"猜歌游戏运行失败: {e}")
-            self._stop_session_waiter(session_id)
-            self.game_sessions.pop(session_id, None)
-            yield event.plain_result("😅 游戏出现了问题，请重新开始")
+        session_id = _game_session_id(event)
+        if session_id in self.game_sessions:
+            yield event.plain_result("⚠️ 当前会话已有进行中的游戏，请先完成或退出！")
+            return
+
+        max_rounds = self.config.get("max_rounds", 10)
+        yield event.plain_result(
+            f"{self.messages['manual_start']}\n🎯 共 {len(self.song_data)} 首歌曲，进行 {max_rounds} 轮",
+        )
+
+        await self._begin_game_session(event, session_id, manual_mode=True)
 
     async def _start_round(self, event: AstrMessageEvent, session_id: str):
         """开始新一轮游戏"""
@@ -754,7 +928,10 @@ class GuessSongPlugin(Star):
 
         game["used_hint"] = False
         game["hint_sent"] = False
-        self._start_half_timeout_hint_task(session_id)
+        if game.get("manual_mode"):
+            await event.send(event.plain_result(self.messages["manual_round_prompt"]))
+        else:
+            self._start_half_timeout_hint_task(session_id)
 
     async def _send_hint(self, event: AstrMessageEvent, session_id: str):
         """发送提示"""
